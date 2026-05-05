@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EduSense — Combined View</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+<!-- ✅ FIX: Use ONE consistent library — @vladmandic/face-api which has bundled weights -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+
+<style>
+/* ─── GLOBAL RESET & VARS ────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #0b0f1a;
+  --surface: #111827;
+  --border:  #1e2d40;
+  --accent:  #00d9ff;
+  --accent2: #7c3aed;
+  --ok:      #10b981;
+  --warn:    #f59e0b;
+  --danger:  #ef4444;
+  --text:    #e2e8f0;
+  --muted:   #64748b;
+  --mono:    'DM Mono', monospace;
+  --sans:    'Sora', sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(0,217,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,217,255,.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none; z-index: 0;
+}
+
+.app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ─── TABS ────────────────────────────────────────── */
+.tab-bar {
+  display: flex; align-items: center;
+  background: rgba(11,15,26,.9);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  position: sticky; top: 0; z-index: 200;
+  backdrop-filter: blur(12px);
+}
+.logo { font-size: 1.1rem; font-weight: 700; letter-spacing: -.02em; padding: 12px 20px 12px 0; border-right: 1px solid var(--border); margin-right: 16px; }
+.logo span { color: var(--accent); }
+
+.tab {
+  padding: 14px 20px;
+  font-size: .82rem; font-weight: 600;
+  cursor: pointer; border: none; background: none;
+  color: var(--muted); position: relative;
+  transition: color .2s; font-family: var(--sans);
+}
+.tab.active { color: var(--accent); }
+.tab.active::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2px; background: var(--accent); border-radius: 2px 2px 0 0;
+}
+
+.status-pill {
+  margin-left: auto; display: flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: .72rem;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 5px 12px; border-radius: 20px; color: var(--muted);
+}
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+.status-dot.active { background: var(--ok); box-shadow: 0 0 6px var(--ok); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{ opacity:1 } 50%{ opacity:.5 } }
+
+.privacy-badge {
+  font-family: var(--mono); font-size: .65rem;
+  background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3);
+  color: var(--ok); padding: 4px 10px; border-radius: 4px; margin-left: 12px;
+}
+
+/* ─── PAGE VIEWS ──────────────────────────────────── */
+.view { display: none; }
+.view.active { display: block; }
+
+/* ════════════════════════════════════════════════════
+   STUDENT VIEW
+════════════════════════════════════════════════════ */
+.student-main {
+  display: grid; grid-template-columns: 1fr 340px; gap: 0;
+  min-height: calc(100vh - 50px);
+}
+
+.player-side { padding: 28px; display: flex; flex-direction: column; gap: 20px; }
+
+.video-wrap {
+  position: relative; background: #000;
+  border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--border); aspect-ratio: 16/9;
+}
+.video-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Intervention overlay */
+.intervention-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 16px;
+  background: rgba(11,15,26,.93);
+  opacity: 0; pointer-events: none; transition: opacity .4s;
+  padding: 32px; text-align: center;
+}
+.intervention-overlay.show { opacity: 1; pointer-events: auto; }
+.intervention-icon { font-size: 3.5rem; }
+.intervention-title { font-size: 1.4rem; font-weight: 700; }
+.intervention-msg { color: var(--muted); font-size: .9rem; line-height: 1.6; max-width: 360px; }
+.intervention-btn {
+  margin-top: 8px; padding: 10px 28px;
+  background: var(--accent); color: #000;
+  border: none; border-radius: 6px;
+  font-family: var(--sans); font-weight: 600; font-size: .9rem;
+  cursor: pointer; transition: transform .15s, box-shadow .15s;
+}
+.intervention-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,217,255,.35); }
+
+.vid-controls {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 10px 16px;
+  background: linear-gradient(transparent, rgba(0,0,0,.8));
+  display: flex; align-items: center; gap: 12px;
+}
+.play-btn {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--accent); border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.progress-bar {
+  flex: 1; height: 3px; background: rgba(255,255,255,.2);
+  border-radius: 3px; cursor: pointer; position: relative;
+}
+.progress-fill {
+  position: absolute; left: 0; top: 0; height: 100%;
+  background: var(--accent); border-radius: 3px;
+  transition: width .5s linear; width: 0%;
+}
+.time-label { font-family: var(--mono); font-size: .7rem; color: rgba(255,255,255,.7); }
+
+.emotion-badge {
+  position: absolute; top: 12px; left: 12px;
+  background: rgba(11,15,26,.8); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 12px;
+  font-family: var(--mono); font-size: .75rem;
+  backdrop-filter: blur(8px); transition: all .3s;
+}
+.emotion-badge .emo-label { font-weight: 500; }
+.emotion-badge .emo-conf { color: var(--muted); font-size: .65rem; margin-top: 2px; }
+
+/* Mini webcam feed */
+.cam-feed-wrap {
+  position: absolute; top: 12px; right: 12px;
+  width: 100px; height: 75px;
+  border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border); background: #000;
+}
+.cam-feed-wrap video, .cam-feed-wrap canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: cover;
+}
+#cam-canvas { z-index: 1; }
+
+/* Model load banner */
+.model-banner {
+  position: absolute; bottom: 52px; left: 0; right: 0;
+  background: rgba(245,158,11,.15); border-top: 1px solid rgba(245,158,11,.3);
+  color: var(--warn); font-family: var(--mono); font-size: .7rem;
+  padding: 6px 14px; text-align: center;
+  transition: opacity .4s;
+}
+.model-banner.hidden { opacity: 0; pointer-events: none; }
+
+.info-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.info-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 16px;
+}
+.info-card .label { font-size: .65rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.info-card .value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; font-family: var(--mono); }
+.info-card .sub { font-size: .72rem; color: var(--muted); margin-top: 3px; }
+
+/* ─── Sidebar ──────────────────────────────────────── */
+.sidebar {
+  border-left: 1px solid var(--border);
+  padding: 24px 20px;
+  display: flex; flex-direction: column; gap: 20px;
+  overflow-y: auto; max-height: calc(100vh - 50px);
+}
+.sidebar-title {
+  font-size: .65rem; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--muted);
+  border-bottom: 1px solid var(--border); padding-bottom: 8px;
+}
+.emotion-bars { display: flex; flex-direction: column; gap: 9px; }
+.emo-row { display: flex; align-items: center; gap: 10px; }
+.emo-name { font-size: .72rem; width: 78px; flex-shrink: 0; font-family: var(--mono); }
+.emo-bar-bg { flex: 1; height: 6px; background: rgba(255,255,255,.07); border-radius: 3px; overflow: hidden; }
+.emo-bar-fill { height: 100%; border-radius: 3px; transition: width .4s cubic-bezier(.4,0,.2,1); }
+.emo-pct { font-size: .68rem; font-family: var(--mono); color: var(--muted); width: 38px; text-align: right; }
+
+.timeline-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px;
+}
+#timeline-canvas { width: 100%; height: 80px; }
+
+.log-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+.log-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 9px 11px; font-size: .72rem;
+}
+.log-item .log-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.log-item .log-time { font-family: var(--mono); color: var(--muted); font-size: .65rem; }
+.log-item .log-text { color: var(--text); line-height: 1.4; }
+
+.model-status {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px; font-size: .75rem;
+}
+.model-status .ms-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.ms-badge { font-family: var(--mono); font-size: .65rem; padding: 2px 8px; border-radius: 10px; }
+.ms-badge.loading { background: rgba(245,158,11,.15); color: var(--warn); }
+.ms-badge.ready   { background: rgba(16,185,129,.15); color: var(--ok); }
+.ms-badge.error   { background: rgba(239,68,68,.15);  color: var(--danger); }
+.ms-badge.demo    { background: rgba(0,217,255,.15);  color: var(--accent); }
+.ms-detail { color: var(--muted); font-size: .68rem; line-height: 1.5; margin-top: 6px; }
+
+.formula-box {
+  background: rgba(124,58,237,.08); border: 1px solid rgba(124,58,237,.25);
+  border-radius: 8px; padding: 12px 14px;
+  font-family: var(--mono); font-size: .72rem; color: #c4b5fd; line-height: 1.8;
+}
+.formula-box .f-label { color: var(--muted); font-size: .65rem; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .1em; }
+
+.sidebar::-webkit-scrollbar, .log-list::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ════════════════════════════════════════════════════
+   TEACHER VIEW
+════════════════════════════════════════════════════ */
+.teacher-main {
+  max-width: 1400px; margin: 0 auto;
+  padding: 28px 32px; display: flex; flex-direction: column; gap: 24px;
+}
+
+.section-title {
+  font-size: .65rem; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--muted); font-family: var(--mono); margin-bottom: 12px;
+}
+
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 18px 20px;
+  position: relative; overflow: hidden;
+}
+.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+.stat-card.engagement::before { background: var(--accent); }
+.stat-card.attention::before  { background: var(--ok); }
+.stat-card.confused::before   { background: var(--warn); }
+.stat-card.events::before     { background: var(--danger); }
+.stat-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.stat-value { font-size: 2.2rem; font-weight: 700; margin: 6px 0 2px; font-family: var(--mono); }
+.stat-sub   { font-size: .72rem; color: var(--muted); }
+
+.chart-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px 24px;
+}
+.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.chart-title  { font-weight: 600; font-size: .95rem; }
+.legend { display: flex; gap: 16px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: .72rem; color: var(--muted); }
+.legend-dot  { width: 8px; height: 8px; border-radius: 50%; }
+
+#main-timeline { width: 100%; height: 200px; display: block; }
+
+.bottom-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+.emo-chart-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; grid-column: span 1;
+}
+#emotion-donut { width: 100%; height: 180px; display: block; }
+
+.table-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; grid-column: span 2;
+}
+table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+thead th {
+  text-align: left; padding: 8px 12px;
+  border-bottom: 2px solid var(--border);
+  font-size: .65rem; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--muted); font-weight: 500;
+}
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:last-child { border-bottom: none; }
+tbody td { padding: 10px 12px; }
+.stu-name { font-weight: 600; }
+.stu-zone { padding: 3px 10px; border-radius: 20px; font-size: .65rem; font-family: var(--mono); }
+.zone-engaged    { background: rgba(16,185,129,.15);  color: var(--ok);     }
+.zone-confused   { background: rgba(245,158,11,.15);  color: var(--warn);   }
+.zone-disengaged { background: rgba(239,68,68,.15);   color: var(--danger); }
+
+.event-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; grid-column: span 3;
+}
+.event-list { display: flex; flex-direction: column; gap: 0; max-height: 240px; overflow-y: auto; }
+.event-row {
+  display: grid; grid-template-columns: 80px 140px 1fr 120px;
+  gap: 16px; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--border); font-size: .78rem;
+}
+.event-row:last-child { border-bottom: none; }
+.event-time { font-family: var(--mono); color: var(--muted); font-size: .7rem; }
+.event-student { font-weight: 600; }
+.event-type {
+  padding: 2px 10px; border-radius: 10px;
+  font-size: .65rem; font-family: var(--mono); display: inline-block;
+}
+.et-confused   { background: rgba(245,158,11,.15); color: var(--warn); }
+.et-bored      { background: rgba(0,217,255,.12);  color: var(--accent); }
+.et-break      { background: rgba(16,185,129,.15); color: var(--ok); }
+.et-frustrated { background: rgba(239,68,68,.15);  color: var(--danger); }
+
+.refresh-info { font-family: var(--mono); font-size: .68rem; color: var(--muted); }
+
+.spec-callout {
+  background: rgba(0,217,255,.05); border: 1px solid rgba(0,217,255,.15);
+  border-radius: 10px; padding: 16px 20px;
+  font-size: .78rem; color: #93c5fd; line-height: 1.6;
+}
+.spec-callout strong { font-weight: 700; color: var(--accent); }
+
+@media (max-width: 900px) {
+  .student-main { grid-template-columns: 1fr; }
+  .sidebar { max-height: none; border-left: none; border-top: 1px solid var(--border); }
+  .stat-row { grid-template-columns: 1fr 1fr; }
+  .bottom-grid { grid-template-columns: 1fr; }
+  .table-card, .event-card { grid-column: span 1; }
+  .event-row { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ─── TAB BAR ──────────────────────────────────── -->
+<div class="tab-bar">
+  <div class="logo">Edu<span>Sense</span></div>
+  <button class="tab active" id="tab-student" onclick="switchTab('student')">🎓 Student View</button>
+  <button class="tab" id="tab-teacher" onclick="switchTab('teacher')">📊 Teacher Dashboard</button>
+  <div class="status-pill">
+    <div class="status-dot" id="cam-dot"></div>
+    <span id="cam-status-text">Camera off</span>
+  </div>
+  <div class="privacy-badge">🔒 Local — no video sent</div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     STUDENT VIEW
+════════════════════════════════════════════════ -->
+<div class="view active" id="view-student">
+  <div class="student-main">
+
+    <!-- Left: Video + stats -->
+    <div class="player-side">
+
+      <div class="video-wrap" id="video-wrap">
+        <video id="lesson-video" loop muted playsinline
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'%3E%3Crect fill='%230b0f1a' width='1280' height='720'/%3E%3Ctext x='640' y='340' font-family='monospace' font-size='24' fill='%2364748b' text-anchor='middle'%3ELesson: Introduction to Neural Networks%3C/text%3E%3Ctext x='640' y='380' font-family='monospace' font-size='16' fill='%231e2d40' text-anchor='middle'%3EClick ▶ to start — webcam emotion analysis begins automatically%3C/text%3E%3C/svg%3E">
+        </video>
+
+        <!-- Emotion badge top-left -->
+        <div class="emotion-badge" id="emotion-badge">
+          <div class="emo-label" id="badge-emotion">—</div>
+          <div class="emo-conf" id="badge-conf">waiting for camera…</div>
+        </div>
+
+        <!-- Mini webcam top-right -->
+        <div class="cam-feed-wrap">
+          <video id="cam-video" autoplay muted playsinline></video>
+          <canvas id="cam-canvas"></canvas>
+        </div>
+
+        <!-- Model loading banner -->
+        <div class="model-banner" id="model-banner">⏳ Loading face detection model… please wait</div>
+
+        <!-- Intervention overlay -->
+        <div class="intervention-overlay" id="intervention-overlay">
+          <div class="intervention-icon" id="int-icon">🤔</div>
+          <div class="intervention-title" id="int-title">Looks like you might be confused</div>
+          <div class="intervention-msg" id="int-msg">No worries! Let me show you a simpler explanation.</div>
+          <button class="intervention-btn" id="int-btn" onclick="dismissIntervention()">Got it — continue</button>
+        </div>
+
+        <!-- Video controls -->
+        <div class="vid-controls">
+          <button class="play-btn" id="play-btn" onclick="toggleVideo()">▶</button>
+          <div class="progress-bar" onclick="seekVideo(event)">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <div class="time-label" id="time-label">0:00 / 5:00</div>
+        </div>
+      </div>
+
+      <!-- Stat cards -->
+      <div class="info-row">
+        <div class="info-card">
+          <div class="label">Engagement Index</div>
+          <div class="value" id="eng-value" style="color:var(--accent)">—</div>
+          <div class="sub" id="zone-label">E = w₁·N + w₂·H − w₃·S</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Session Time</div>
+          <div class="value" id="session-time" style="color:var(--accent2)">0:00</div>
+          <div class="sub">elapsed</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Interventions</div>
+          <div class="value" id="int-count" style="color:var(--warn)">0</div>
+          <div class="sub">triggers this session</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Sidebar -->
+    <div class="sidebar">
+
+      <!-- FER Model status -->
+      <div>
+        <div class="sidebar-title">FER Model Status</div>
+        <div class="model-status">
+          <div class="ms-row">
+            <span>@vladmandic/face-api (TinyFaceDetector)</span>
+            <span class="ms-badge loading" id="model-badge">Loading…</span>
+          </div>
+          <div class="ms-detail" id="model-detail">Downloading model weights from CDN…</div>
+        </div>
+      </div>
+
+      <!-- Live emotion bars -->
+      <div>
+        <div class="sidebar-title">Live Emotion Distribution</div>
+        <div class="emotion-bars" id="emotion-bars"></div>
+      </div>
+
+      <!-- Formula -->
+      <div>
+        <div class="sidebar-title">Engagement Formula</div>
+        <div class="formula-box">
+          <div class="f-label">Spec §3 — Rolling Average</div>
+          E = <b>0.4</b>·Neutral + <b>0.6</b>·Happy − <b>0.5</b>·Sad<br>
+          Rolling window: <b>30 samples</b><br>
+          Threshold: <b>E &lt; 0.35</b> → Intervention<br>
+          Current E: <b id="formula-e">—</b>
+        </div>
+      </div>
+
+      <!-- Engagement timeline -->
+      <div>
+        <div class="sidebar-title">Engagement Timeline</div>
+        <div class="timeline-wrap">
+          <canvas id="timeline-canvas" width="280" height="80"></canvas>
+        </div>
+      </div>
+
+      <!-- Intervention log -->
+      <div>
+        <div class="sidebar-title">Intervention Log</div>
+        <div class="log-list" id="log-list">
+          <div style="color:var(--muted);font-size:.72rem;text-align:center;padding:12px 0">No interventions yet</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     TEACHER VIEW
+════════════════════════════════════════════════ -->
+<div class="view" id="view-teacher">
+  <div class="teacher-main">
+
+    <div class="spec-callout">
+      <strong>Classroom Engagement Timeline</strong> — Per project spec (§ Expected Outcomes), this dashboard shows when students disengaged, got confused, or needed intervention.
+      Formula: <code>E = 0.4·Neutral + 0.6·Happy − 0.5·Sad</code> · Rolling window: 30 samples · Threshold: E &lt; 0.35 triggers adaptive response.
+      All data from client-side TensorFlow.js inference — <strong>no video stored or transmitted</strong>.
+    </div>
+
+    <div>
+      <div class="section-title">Session Overview</div>
+      <div class="stat-row">
+        <div class="stat-card engagement">
+          <div class="stat-label">Avg Engagement Index</div>
+          <div class="stat-value" id="stat-eng" style="color:var(--accent)">—</div>
+          <div class="stat-sub" id="stat-eng-sub">E = w₁N + w₂H − w₃S</div>
+        </div>
+        <div class="stat-card attention">
+          <div class="stat-label">Students Engaged</div>
+          <div class="stat-value" id="stat-engaged" style="color:var(--ok)">—</div>
+          <div class="stat-sub">above threshold (E ≥ 0.35)</div>
+        </div>
+        <div class="stat-card confused">
+          <div class="stat-label">Peak Confusion At</div>
+          <div class="stat-value" id="stat-peak-confusion" style="color:var(--warn)">—</div>
+          <div class="stat-sub">minute of session</div>
+        </div>
+        <div class="stat-card events">
+          <div class="stat-label">Interventions Fired</div>
+          <div class="stat-value" id="stat-events" style="color:var(--danger)">0</div>
+          <div class="stat-sub">adaptive triggers</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">Classroom Engagement Timeline</div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Engagement (E)</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div> Threshold (0.35)</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--danger)"></div> Intervention</div>
+        </div>
+        <span class="refresh-info" id="last-refresh">—</span>
+      </div>
+      <canvas id="main-timeline"></canvas>
+    </div>
+
+    <div class="bottom-grid">
+      <div class="emo-chart-card">
+        <div class="section-title">Session Emotion Distribution</div>
+        <canvas id="emotion-donut"></canvas>
+        <div id="donut-legend" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px"></div>
+      </div>
+      <div class="table-card">
+        <div class="section-title">Student Status (Simulated Class)</div>
+        <table>
+          <thead><tr><th>Student</th><th>Engagement</th><th>Zone</th><th>Last Emotion</th><th>Interventions</th></tr></thead>
+          <tbody id="student-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="section-title">Intervention Event Log</div>
+      <div style="display:grid;grid-template-columns:80px 140px 1fr 120px;gap:16px;padding:0 0 8px;border-bottom:2px solid var(--border);font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);">
+        <span>Time</span><span>Student</span><span>Event</span><span>Type</span>
+      </div>
+      <div class="event-list" id="event-list">
+        <div style="color:var(--muted);font-size:.75rem;padding:16px 0;text-align:center">
+          No interventions yet — start the student session.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</div><!-- .app -->
+
+<script>
+'use strict';
+// ════════════════════════════════════════════════════
+//  TAB SWITCHING
+// ════════════════════════════════════════════════════
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('view-' + tab).classList.add('active');
+  if (tab === 'teacher') refreshTeacher();
+}
+
+// ════════════════════════════════════════════════════
+//  CONFIGURATION
+// ════════════════════════════════════════════════════
+const CFG = {
+  W1: 0.4,  // Neutral weight
+  W2: 0.6,  // Happy weight
+  W3: 0.5,  // Sad weight
+  ENGAGEMENT_THRESHOLD: 0.35,
+  CONFUSION_THRESHOLD:  0.45,
+  BOREDOM_THRESHOLD:    0.40,
+  ROLLING_WINDOW:       30,
+  INFERENCE_INTERVAL_MS: 800,
+  COOLDOWN_MS: 15000,
+};
+
+const EMOTIONS = ['neutral','happy','sad','angry','fearful','disgusted','surprised'];
+const COLORS = {
+  neutral:'#94a3b8', happy:'#10b981', sad:'#60a5fa',
+  angry:'#ef4444', fearful:'#f59e0b', disgusted:'#8b5cf6', surprised:'#ec4899',
+};
+const EMOJI = {
+  neutral:'😐', happy:'😊', sad:'😢',
+  angry:'😠', fearful:'😨', disgusted:'🤢', surprised:'😲',
+};
+
+// ════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════
+const state = {
+  modelReady: false,
+  camReady: false,
+  isPlaying: false,
+  sessionStart: null,
+  elapsedSec: 0,
+  currentEmotion: 'neutral',
+  currentProbs: Object.fromEntries(EMOTIONS.map(e => [e, 1/7])),
+  rollingEngagement: [],
+  engagementHistory: [],
+  interventionCount: 0,
+  lastIntervention: 0,
+  logItems: [],
+  emotionHistory: [],  // for donut averaging
+};
+
+// ════════════════════════════════════════════════════
+//  DOM HELPERS
+// ════════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const camVideo  = $('cam-video');
+const camCanvas = $('cam-canvas');
+const ctx2d     = camCanvas.getContext('2d');
+
+// ════════════════════════════════════════════════════
+//  INIT EMOTION BARS
+// ════════════════════════════════════════════════════
+function initEmotionBars() {
+  const container = $('emotion-bars');
+  container.innerHTML = EMOTIONS.map(e => `
+    <div class="emo-row">
+      <div class="emo-name">${EMOJI[e]} ${e}</div>
+      <div class="emo-bar-bg">
+        <div class="emo-bar-fill" id="bar-${e}"
+             style="width:${(100/7).toFixed(1)}%;background:${COLORS[e]}"></div>
+      </div>
+      <div class="emo-pct" id="pct-${e}">${(100/7).toFixed(0)}%</div>
+    </div>`).join('');
+}
+initEmotionBars();
+
+// ════════════════════════════════════════════════════
+//  ✅ FIXED: Load face-api models from @vladmandic CDN
+//  Uses the same library that is imported in <head>
+// ════════════════════════════════════════════════════
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model';
+
+async function loadModels() {
+  try {
+    $('model-detail').textContent = 'Loading TinyFaceDetector…';
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+
+    $('model-detail').textContent = 'Loading FaceExpression network…';
+    await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+
+    $('model-badge').textContent = 'Ready ✓';
+    $('model-badge').className   = 'ms-badge ready';
+    $('model-detail').textContent =
+      'FER-2013 classes: Neutral, Happy, Sad, Angry, Fearful, Disgusted, Surprised. ' +
+      'All inference runs locally in WebAssembly — nothing leaves your device.';
+    $('model-banner').classList.add('hidden');
+
+    state.modelReady = true;
+    startCamera();
+  } catch(err) {
+    console.error('Model load error:', err);
+    $('model-badge').textContent = 'Error';
+    $('model-badge').className   = 'ms-badge error';
+    $('model-detail').textContent = `Could not load models: ${err.message}. Running demo mode.`;
+    $('model-banner').classList.add('hidden');
+    startDemoMode();
+  }
+}
+
+// ════════════════════════════════════════════════════
+//  CAMERA
+// ════════════════════════════════════════════════════
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' }
+    });
+    camVideo.srcObject = stream;
+    await camVideo.play();
+    camCanvas.width  = camVideo.videoWidth  || 320;
+    camCanvas.height = camVideo.videoHeight || 240;
+    state.camReady = true;
+    $('cam-dot').className        = 'status-dot active';
+    $('cam-status-text').textContent = 'Camera active';
+    state.sessionStart = Date.now();
+    startInferenceLoop();
+    startSessionTimer();
+  } catch(err) {
+    console.warn('Camera error:', err);
+    $('cam-dot').className = 'status-dot';
+    $('cam-status-text').textContent = 'Camera denied';
+    $('model-badge').textContent = 'Demo';
+    $('model-badge').className   = 'ms-badge demo';
+    $('model-detail').textContent =
+      'Camera permission denied. Running demo mode with simulated emotion data. ' +
+      'To use real FER, allow camera access and refresh.';
+    startDemoMode();
+  }
+}
+
+// ════════════════════════════════════════════════════
+//  INFERENCE LOOP
+// ════════════════════════════════════════════════════
+async function runInference() {
+  if (!state.modelReady || !state.camReady) return;
+  if (camVideo.readyState < 2) return; // video not ready yet
+
+  try {
+    const options = new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.3, inputSize: 160 });
+    const detection = await faceapi
+      .detectSingleFace(camVideo, options)
+      .withFaceExpressions();
+
+    if (detection) {
+      // Draw bounding box on mini canvas
+      ctx2d.clearRect(0, 0, camCanvas.width, camCanvas.height);
+      const box = detection.detection.box;
+      const scX = camCanvas.width  / (camVideo.videoWidth  || 320);
+      const scY = camCanvas.height / (camVideo.videoHeight || 240);
+      ctx2d.strokeStyle = '#00d9ff';
+      ctx2d.lineWidth   = 2;
+      ctx2d.strokeRect(box.x*scX, box.y*scY, box.width*scX, box.height*scY);
+
+      // Use face-api expressions directly (they are already normalized)
+      const expr = {};
+      EMOTIONS.forEach(e => { expr[e] = detection.expressions[e] || 0; });
+      processExpressions(expr);
+    } else {
+      $('badge-conf').textContent = 'No face detected — look at the camera';
+      ctx2d.clearRect(0, 0, camCanvas.width, camCanvas.height);
+    }
+  } catch(err) {
+    console.warn('Inference error:', err);
+  }
+}
+
+function startInferenceLoop() {
+  setInterval(runInference, CFG.INFERENCE_INTERVAL_MS);
+}
+
+// ════════════════════════════════════════════════════
+//  PROCESS EXPRESSIONS → Engagement → Interventions
+// ════════════════════════════════════════════════════
+function processExpressions(expr) {
+  state.currentProbs = { ...expr };
+
+  // Dominant emotion
+  const dominant = Object.entries(expr).sort((a,b) => b[1]-a[1])[0];
+  state.currentEmotion = dominant[0];
+
+  $('badge-emotion').textContent = `${EMOJI[dominant[0]]} ${dominant[0]}`;
+  $('badge-conf').textContent    = `${(dominant[1]*100).toFixed(1)}% confidence`;
+
+  // Update bars
+  EMOTIONS.forEach(e => {
+    const pct = ((expr[e]||0)*100).toFixed(1);
+    const bar = $(`bar-${e}`);
+    const lbl = $(`pct-${e}`);
+    if (bar) bar.style.width = pct + '%';
+    if (lbl) lbl.textContent = pct + '%';
+  });
+
+  // Store for donut
+  state.emotionHistory.push({ ...expr });
+  if (state.emotionHistory.length > 60) state.emotionHistory.shift();
+
+  // Engagement Index
+  const E = CFG.W1*(expr.neutral||0) + CFG.W2*(expr.happy||0) - CFG.W3*(expr.sad||0);
+  const Eclamped = Math.max(0, Math.min(1, E));
+  state.rollingEngagement.push(Eclamped);
+  if (state.rollingEngagement.length > CFG.ROLLING_WINDOW) state.rollingEngagement.shift();
+  const rollingAvg = state.rollingEngagement.reduce((a,b)=>a+b,0) / state.rollingEngagement.length;
+
+  $('eng-value').textContent = rollingAvg.toFixed(2);
+  $('formula-e').textContent = rollingAvg.toFixed(3);
+
+  let zone = '✅ Engaged', zoneColor = 'var(--ok)';
+  if (rollingAvg < 0.2)                      { zone = '⚠ Disengaged';     zoneColor = 'var(--danger)'; }
+  else if (rollingAvg < CFG.ENGAGEMENT_THRESHOLD) { zone = '⚡ Low Engagement'; zoneColor = 'var(--warn)'; }
+  $('zone-label').textContent = zone;
+  $('eng-value').style.color  = zoneColor;
+
+  state.engagementHistory.push({ sec: state.elapsedSec, e: rollingAvg });
+  if (state.engagementHistory.length > 200) state.engagementHistory.shift();
+  drawTimeline();
+
+  checkInterventions(expr, rollingAvg);
+  syncTeacherData();
+}
+
+// ════════════════════════════════════════════════════
+//  ADAPTIVE INTERVENTION LOGIC
+// ════════════════════════════════════════════════════
+function checkInterventions(expr, rollingAvg) {
+  const now = Date.now();
+  if (now - state.lastIntervention < CFG.COOLDOWN_MS) return;
+
+  const confused = (expr.fearful||0) + (expr.surprised||0) * 0.5;
+  if (confused > CFG.CONFUSION_THRESHOLD) {
+    triggerIntervention('confused', '🤔 Looks like you might be confused',
+      'The video has been paused. Think of a neural network as a series of filters — each finding patterns at different scales.',
+      'Got it — resume lesson');
+    return;
+  }
+
+  if ((expr.neutral||0) > 0.75 || (expr.disgusted||0) > CFG.BOREDOM_THRESHOLD) {
+    triggerIntervention('bored', '😴 Detecting low engagement',
+      'Time for a quick challenge! Can you answer this before we continue? Take a 30-second quiz.',
+      'Take the quiz!');
+    return;
+  }
+
+  if (rollingAvg < CFG.ENGAGEMENT_THRESHOLD) {
+    triggerIntervention('break', '☕ Your attention is dipping',
+      'You\'ve been studying for a while. A 5-minute break improves retention by up to 23%. Take a breather?',
+      'Take a break');
+    return;
+  }
+
+  if ((expr.angry||0) > 0.35) {
+    triggerIntervention('frustrated', '💪 Don\'t give up!',
+      'This is a challenging topic. You\'re doing great — many students find this part tough. Want a worked example?',
+      'Show me an example');
+    return;
+  }
+}
+
+function triggerIntervention(type, title, msg, btnText) {
+  state.lastIntervention = Date.now();
+  state.interventionCount++;
+  $('int-count').textContent = state.interventionCount;
+  $('int-title').textContent = title;
+  $('int-msg').textContent   = msg;
+  $('int-btn').textContent   = btnText;
+  $('intervention-overlay').classList.add('show');
+  state.isPlaying = false;
+  $('play-btn').textContent = '▶';
+  addLogItem(type, title);
+}
+
+function dismissIntervention() {
+  $('intervention-overlay').classList.remove('show');
+}
+
+// ════════════════════════════════════════════════════
+//  INTERVENTION LOG
+// ════════════════════════════════════════════════════
+function addLogItem(type, title) {
+  const icons = { confused:'🤔', bored:'😴', break:'☕', frustrated:'💪' };
+  const now = new Date();
+  const ts  = `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  state.logItems.unshift({ type, title, ts, sec: state.elapsedSec });
+  const list = $('log-list');
+  list.innerHTML = state.logItems.map(item => `
+    <div class="log-item">
+      <div class="log-icon">${icons[item.type]||'ℹ️'}</div>
+      <div>
+        <div class="log-time">${item.ts} · t=${item.sec}s</div>
+        <div class="log-text">${item.title}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ════════════════════════════════════════════════════
+//  SYNC WITH TEACHER (same-page shared state)
+// ════════════════════════════════════════════════════
+function syncTeacherData() {
+  // Store in window object so teacher panel can read it instantly (same page)
+  window._teacherData = {
+    history: state.engagementHistory,
+    interventions: state.logItems,
+    emotionHistory: state.emotionHistory,
+    interventionCount: state.interventionCount,
+  };
+}
+
+// ════════════════════════════════════════════════════
+//  TIMELINE CANVAS (student sidebar)
+// ════════════════════════════════════════════════════
+function drawTimeline() {
+  const canvas = $('timeline-canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const hist = state.engagementHistory;
+  if (hist.length < 2) return;
+
+  ctx.fillStyle = 'rgba(255,255,255,.03)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(245,158,11,.4)';
+  ctx.setLineDash([4,4]); ctx.lineWidth = 1;
+  const ty = H - CFG.ENGAGEMENT_THRESHOLD * H;
+  ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.lineWidth = 2; ctx.strokeStyle = '#00d9ff';
+  ctx.beginPath();
+  hist.forEach((p, i) => {
+    const x = (i / (hist.length-1)) * W;
+    const y = H - p.e * H;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(0,217,255,.25)');
+  grad.addColorStop(1, 'rgba(0,217,255,.0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  hist.forEach((p, i) => {
+    const x = (i / (hist.length-1)) * W;
+    const y = H - p.e * H;
+    ctx.lineTo(x, y);
+  });
+  ctx.lineTo(W, H);
+  ctx.closePath(); ctx.fill();
+}
+
+// ════════════════════════════════════════════════════
+//  SESSION TIMER
+// ════════════════════════════════════════════════════
+function startSessionTimer() {
+  setInterval(() => {
+    state.elapsedSec++;
+    const m = Math.floor(state.elapsedSec / 60);
+    const s = state.elapsedSec % 60;
+    $('session-time').textContent = `${m}:${String(s).padStart(2,'0')}`;
+  }, 1000);
+}
+
+// ════════════════════════════════════════════════════
+//  VIDEO PLAYER
+// ════════════════════════════════════════════════════
+let videoProgress = 0, videoTimer = null;
+const VIDEO_DURATION = 300;
+
+function toggleVideo() {
+  state.isPlaying = !state.isPlaying;
+  $('play-btn').textContent = state.isPlaying ? '⏸' : '▶';
+  if (state.isPlaying) {
+    videoTimer = setInterval(() => {
+      videoProgress = Math.min(VIDEO_DURATION, videoProgress + 1);
+      const pct = (videoProgress / VIDEO_DURATION * 100).toFixed(1);
+      $('progress-fill').style.width = pct + '%';
+      const m = Math.floor(videoProgress/60), s = videoProgress%60;
+      const dm = Math.floor(VIDEO_DURATION/60), ds = VIDEO_DURATION%60;
+      $('time-label').textContent = `${m}:${String(s).padStart(2,'0')} / ${dm}:${String(ds).padStart(2,'0')}`;
+      if (videoProgress >= VIDEO_DURATION) clearInterval(videoTimer);
+    }, 1000);
+  } else {
+    clearInterval(videoTimer);
+  }
+}
+
+function seekVideo(e) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const ratio = (e.clientX - rect.left) / rect.width;
+  videoProgress = Math.round(ratio * VIDEO_DURATION);
+  $('progress-fill').style.width = (ratio * 100) + '%';
+}
+
+// ════════════════════════════════════════════════════
+//  DEMO MODE
+// ════════════════════════════════════════════════════
+function startDemoMode() {
+  $('cam-dot').className = 'status-dot active';
+  $('cam-status-text').textContent = 'Demo mode';
+  state.sessionStart = Date.now();
+  state.modelReady = true;
+  state.camReady   = true;
+  startSessionTimer();
+
+  const scenarios = [
+    { neutral:.6, happy:.2, sad:.05, angry:.03, fearful:.04, disgusted:.04, surprised:.04 },
+    { neutral:.3, happy:.5, sad:.05, angry:.03, fearful:.04, disgusted:.04, surprised:.04 },
+    { neutral:.5, happy:.1, sad:.2,  angry:.05, fearful:.05, disgusted:.05, surprised:.05 },
+    { neutral:.7, happy:.1, sad:.05, angry:.03, fearful:.04, disgusted:.04, surprised:.04 },
+    { neutral:.2, happy:.1, sad:.1,  angry:.05, fearful:.3,  disgusted:.15, surprised:.1  },
+  ];
+  let tick = 0;
+
+  setInterval(() => {
+    const base = scenarios[Math.floor(tick/20) % scenarios.length];
+    const noisy = {};
+    let sum = 0;
+    EMOTIONS.forEach(e => { noisy[e] = Math.max(0, (base[e]||0) + (Math.random()-.5)*.15); sum += noisy[e]; });
+    EMOTIONS.forEach(e => { noisy[e] /= sum; });
+    processExpressions(noisy);
+    tick++;
+  }, CFG.INFERENCE_INTERVAL_MS);
+}
+
+// ════════════════════════════════════════════════════
+//  TEACHER DASHBOARD RENDERING
+// ════════════════════════════════════════════════════
+const STUDENTS = [
+  { name:'Arjun Kumar',  baseEng:.72, emotion:'happy'    },
+  { name:'Priya Sharma', baseEng:.58, emotion:'neutral'  },
+  { name:'Rahul Verma',  baseEng:.31, emotion:'sad'      },
+  { name:'Sneha Nair',   baseEng:.65, emotion:'neutral'  },
+  { name:'Dev Patel',    baseEng:.28, emotion:'fearful'  },
+  { name:'Meena Iyer',   baseEng:.80, emotion:'happy'    },
+  { name:'Kiran Reddy',  baseEng:.44, emotion:'neutral'  },
+  { name:'Anjali Singh', baseEng:.38, emotion:'surprised'},
+];
+
+function getZone(e) {
+  if (e >= .55) return { label:'Engaged',    cls:'zone-engaged' };
+  if (e >= .35) return { label:'Borderline', cls:'zone-confused' };
+  return               { label:'Disengaged', cls:'zone-disengaged' };
+}
+
+function buildStudentTable(interventions) {
+  const tbody = $('student-tbody');
+  tbody.innerHTML = STUDENTS.map((s, i) => {
+    const eng  = Math.max(0, Math.min(1, s.baseEng + (Math.random()-.5)*.12));
+    const zone = getZone(eng);
+    const cnt  = Math.floor(Math.random() * 3);
+    return `<tr>
+      <td><span class="stu-name">${s.name}</span></td>
+      <td style="font-family:var(--mono);font-size:.82rem">${eng.toFixed(2)}</td>
+      <td><span class="stu-zone ${zone.cls}">${zone.label}</span></td>
+      <td>${EMOJI[s.emotion]} ${s.emotion}</td>
+      <td style="font-family:var(--mono)">${cnt}</td>
+    </tr>`;
+  }).join('');
+}
+
+function drawMainTimeline(history, interventions) {
+  const canvas = $('main-timeline');
+  const W = canvas.offsetWidth; canvas.width = W;
+  const H = 200; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = (i / 4) * H;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.fillStyle = '#64748b'; ctx.font = '11px DM Mono, monospace';
+    ctx.fillText((1 - i/4).toFixed(2), 4, y - 4);
+  }
+
+  ctx.strokeStyle = 'rgba(245,158,11,.5)'; ctx.setLineDash([5,5]); ctx.lineWidth = 1.5;
+  const ty = H - .35 * H;
+  ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#f59e0b'; ctx.fillText('E=0.35', W - 52, ty - 5);
+
+  if (!history || history.length < 2) {
+    // Simulated data
+    history = [];
+    for (let i = 0; i < 80; i++)
+      history.push({ sec: i*4, e: .45 + Math.sin(i*.3)*.2 + (Math.random()-.5)*.08 });
+  }
+
+  const maxSec = history[history.length-1].sec || 1;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(0,217,255,.25)');
+  grad.addColorStop(1, 'rgba(0,217,255,.0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.moveTo(0, H);
+  history.forEach(p => {
+    ctx.lineTo((p.sec/maxSec)*W, H - Math.max(0,Math.min(1,p.e))*H);
+  });
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+
+  ctx.strokeStyle = '#00d9ff'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  history.forEach((p, i) => {
+    const x = (p.sec/maxSec)*W, y = H - Math.max(0,Math.min(1,p.e))*H;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Intervention markers
+  if (interventions && interventions.length) {
+    interventions.forEach(ev => {
+      const x = (ev.sec / maxSec) * W;
+      ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.5; ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ef4444'; ctx.font = '10px DM Mono, monospace';
+      ctx.fillText('⚡', x - 6, 14);
+    });
+  }
+}
+
+function drawDonut(emotionHistory) {
+  const canvas = $('emotion-donut');
+  const size = Math.min(canvas.offsetWidth, 180);
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cx = size/2, cy = size/2, R = size/2 - 10, r = R*.55;
+
+  // Average distribution from history or use defaults
+  let distribution;
+  if (emotionHistory && emotionHistory.length > 5) {
+    distribution = {};
+    EMOTIONS.forEach(e => { distribution[e] = 0; });
+    emotionHistory.forEach(h => { EMOTIONS.forEach(e => { distribution[e] += (h[e]||0); }); });
+    EMOTIONS.forEach(e => { distribution[e] /= emotionHistory.length; });
+  } else {
+    distribution = { neutral:.35, happy:.25, sad:.12, angry:.08, fearful:.08, disgusted:.07, surprised:.05 };
+  }
+
+  const total = Object.values(distribution).reduce((a,b)=>a+b, 0) || 1;
+  let angle = -Math.PI/2;
+  ctx.clearRect(0, 0, size, size);
+  const legendEl = $('donut-legend');
+  legendEl.innerHTML = '';
+
+  Object.entries(distribution).forEach(([e, v]) => {
+    const slice = (v/total) * Math.PI * 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, angle, angle + slice);
+    ctx.closePath(); ctx.fillStyle = COLORS[e] || '#ccc'; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.fillStyle = '#111827'; ctx.fill();
+    angle += slice;
+
+    legendEl.innerHTML += `<span style="display:flex;align-items:center;gap:4px;font-size:.65rem;color:#94a3b8">
+      <span style="width:8px;height:8px;border-radius:50%;background:${COLORS[e]};flex-shrink:0"></span>
+      ${e} ${(v*100).toFixed(0)}%
+    </span>`;
+  });
+}
+
+function renderEventList(interventions) {
+  const list = $('event-list');
+  if (!interventions || !interventions.length) return;
+
+  const typeClass = { confused:'et-confused', bored:'et-bored', break:'et-break', frustrated:'et-frustrated' };
+  const allEvents = [
+    ...interventions.map(e => ({ ...e, student: 'You (current session)' })),
+    { type:'confused',   student:'Rahul Verma',  sec:45,  title:'Looks confused' },
+    { type:'bored',      student:'Dev Patel',    sec:120, title:'Low engagement' },
+    { type:'break',      student:'Anjali Singh', sec:200, title:'Attention dipping' },
+  ].sort((a,b) => a.sec - b.sec);
+
+  list.innerHTML = allEvents.map(ev => {
+    const m = Math.floor(ev.sec/60), s = ev.sec%60;
+    const ts = `${m}:${String(s).padStart(2,'0')}`;
+    return `<div class="event-row">
+      <span class="event-time">${ts}</span>
+      <span class="event-student">${ev.student||'Unknown'}</span>
+      <span>${ev.title||ev.type}</span>
+      <span class="event-type ${typeClass[ev.type]||''}">${ev.type}</span>
+    </div>`;
+  }).join('');
+}
+
+function updateTeacherStats(history, interventions) {
+  const vals = (history||[]).map(h=>h.e);
+  const avg  = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+  $('stat-eng').textContent     = avg ? avg.toFixed(2) : '0.54';
+  $('stat-eng-sub').textContent = avg ? (avg >= .35 ? '▲ Above threshold' : '▼ Below threshold') : 'Simulated data';
+
+  const simEngaged = STUDENTS.filter(s=>s.baseEng >= .35).length;
+  $('stat-engaged').textContent = `${simEngaged} / ${STUDENTS.length}`;
+
+  let minIdx = 0, minE = 1;
+  (history||[]).forEach((h,i) => { if(h.e < minE) { minE = h.e; minIdx = i; } });
+  const peakSec = (history||[]).length ? (history[minIdx]?.sec||0) : 75;
+  $('stat-peak-confusion').textContent = `Min ${Math.floor(peakSec/60)+1}`;
+  $('stat-events').textContent = (interventions||[]).length + 3;
+}
+
+function refreshTeacher() {
+  const data = window._teacherData || { history:[], interventions:[], emotionHistory:[] };
+  const now  = new Date();
+  $('last-refresh').textContent =
+    `Updated: ${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+  updateTeacherStats(data.history, data.interventions);
+  drawMainTimeline(data.history, data.interventions);
+  renderEventList(data.interventions);
+  buildStudentTable(data.interventions);
+  drawDonut(data.emotionHistory);
+}
+
+// Auto-refresh teacher tab every 3 seconds
+setInterval(() => {
+  if ($('view-teacher').classList.contains('active')) refreshTeacher();
+}, 3000);
+
+window.addEventListener('resize', () => {
+  if ($('view-teacher').classList.contains('active')) {
+    drawMainTimeline(window._teacherData?.history, window._teacherData?.interventions);
+    drawDonut(window._teacherData?.emotionHistory);
+  }
+});
+
+// ════════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════════
+loadModels();
+</script>
+</body>
+</html>
